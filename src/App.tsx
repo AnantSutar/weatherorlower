@@ -10,7 +10,7 @@ import { InstructionsDialog } from "./components/game/InstructionsDialog";
 import { Leaderboard } from "./components/game/Leaderboard";
 import { StatusBanner } from "./components/game/StatusBanner";
 import type { City, Guess } from "./components/game/types";
-import { replaceProfanities } from 'no-profanity';
+import { replaceProfanities } from "no-profanity";
 const INSTRUCTIONS_SEEN_KEY = "weather-higher-or-lower.instructions-seen";
 
 function App() {
@@ -213,12 +213,19 @@ function App() {
       return;
     }
 
+    const sanitizedName = replaceProfanities(name.trim());
+
+    if (!sanitizedName) {
+      setSaveError("Please enter a valid name.");
+      return;
+    }
+
     setIsSavingScore(true);
     setSaveError("");
     setSaveSuccessMessage("");
 
     try {
-      await saveScore(name, sessionBestScore);
+      await saveScore(sanitizedName, sessionBestScore);
 
       setSavedBestScore(sessionBestScore);
       setSaveSuccessMessage("Best score saved to the leaderboard.");
