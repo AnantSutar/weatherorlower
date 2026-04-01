@@ -6,3 +6,10 @@ export type City = {
 };
 
 export type Guess = "higher" | "lower";
+
+export type LeaderboardEntry = {
+  id: number;
+  name: string;
+  score: number;
+  createdAt: string;
+};

@@ -1,19 +1,17 @@
 import { useEffect, useState } from "react";
+import { saveScore } from "./api/leaderboard";
+import { createInitialMatchup, createNextCity } from "./api/weather";
 import { Button } from "./components/ui/button";
 import { CityCard } from "./components/game/CityCard";
 import { GameHeader } from "./components/game/GameHeader";
 import { GameOverDialog } from "./components/game/GameOverDialog";
 import { GuessControls } from "./components/game/GuessControls";
 import { InstructionsDialog } from "./components/game/InstructionsDialog";
+import { Leaderboard } from "./components/game/Leaderboard";
 import { StatusBanner } from "./components/game/StatusBanner";
 import type { City, Guess } from "./components/game/types";
-
-const RANDOM_CITY_URL = "https://random-city-api.vercel.app/api/random-city";
-const MAX_CITY_ATTEMPTS = 8;
+import { replaceProfanities } from 'no-profanity';
 const INSTRUCTIONS_SEEN_KEY = "weather-higher-or-lower.instructions-seen";
-
-const getCityKey = (city: City) =>
-  `${city.name.trim().toLowerCase()}-${city.country.trim().toLowerCase()}`;
 
 function App() {
   const [currentCity, setCurrentCity] = useState<City | null>(null);
@@ -26,114 +24,21 @@ function App() {
   const [showInstructions, setShowInstructions] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
   const [lastScore, setLastScore] = useState(0);
+  const [sessionBestScore, setSessionBestScore] = useState(0);
+  const [savedBestScore, setSavedBestScore] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState("");
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState("");
+  const [isSavingScore, setIsSavingScore] = useState(false);
+  const [leaderboardRefreshKey, setLeaderboardRefreshKey] = useState(0);
 
   const apiKey = import.meta.env.VITE_WEATHER_API_KEY;
   const hasApiKey = typeof apiKey === "string" && apiKey.trim().length > 0;
   const isBusy = isLoadingGame || isLoadingNextCity;
   const isModalOpen = showInstructions || showGameOver;
 
-  const fetchCityName = async (): Promise<string> => {
-    const res = await fetch(RANDOM_CITY_URL);
-
-    if (!res.ok) {
-      throw new Error("Couldn't fetch a random city.");
-    }
-
-    const data = (await res.json()) as { city?: unknown };
-    const rawCity = typeof data.city === "string" ? data.city.trim() : "";
-
-    if (!rawCity) {
-      throw new Error("Random city service returned invalid data.");
-    }
-
-    try {
-      return decodeURIComponent(rawCity);
-    } catch {
-      return rawCity;
-    }
-  };
-
-  const fetchWeather = async (city: string): Promise<City | null> => {
-    if (!hasApiKey) {
-      throw new Error("Missing VITE_WEATHER_API_KEY.");
-    }
-
-    const res = await fetch(
-      `https://api.weatherapi.com/v1/current.json?key=${apiKey}&q=${encodeURIComponent(city)}&aqi=no`,
-    );
-
-    const data = (await res.json()) as {
-      error?: { message?: string };
-      location?: { country?: unknown; name?: unknown };
-      current?: { temp_c?: unknown; condition?: { icon?: unknown } };
-    };
-
-    if (!res.ok) {
-      const isMissingCity =
-        typeof data.error?.message === "string" &&
-        data.error.message.toLowerCase().includes("no matching location found");
-
-      if (isMissingCity) {
-        return null;
-      }
-
-      throw new Error("Weather service is unavailable right now.");
-    }
-
-    if (data.error) {
-      return null;
-    }
-
-    const name =
-      typeof data.location?.name === "string" ? data.location.name.trim() : "";
-    const country =
-      typeof data.location?.country === "string"
-        ? data.location.country.trim()
-        : "";
-    const temp =
-      typeof data.current?.temp_c === "number" ? data.current.temp_c : null;
-    const icon =
-      typeof data.current?.condition?.icon === "string"
-        ? data.current.condition.icon
-        : "";
-
-    if (!name || !country || temp === null) {
-      return null;
-    }
-
-    const normalizedIcon = icon
-      ? icon.startsWith("//")
-        ? `https:${icon}`
-        : icon
-      : "";
-
-    return {
-      name,
-      country,
-      temp,
-      img: normalizedIcon,
-    };
-  };
-
-  const buildCity = async (excludedKeys: string[] = []): Promise<City> => {
-    const blockedKeys = new Set(excludedKeys);
-
-    for (let attempt = 0; attempt < MAX_CITY_ATTEMPTS; attempt += 1) {
-      const rawCity = await fetchCityName();
-      const weather = await fetchWeather(rawCity);
-
-      if (!weather) {
-        continue;
-      }
-
-      if (blockedKeys.has(getCityKey(weather))) {
-        continue;
-      }
-
-      return weather;
-    }
-
-    throw new Error("Couldn't find a valid city matchup. Please try again.");
+  const resetRunUiState = () => {
+    setStatusMessage("");
+    setHasError(false);
   };
 
   const loadGame = async () => {
@@ -147,16 +52,16 @@ function App() {
     }
 
     setIsLoadingGame(true);
-    setStatusMessage("");
-    setHasError(false);
+    resetRunUiState();
 
     try {
-      const cityA = await buildCity();
-      const cityB = await buildCity([getCityKey(cityA)]);
+      const { currentCity, nextCity } = await createInitialMatchup(apiKey);
 
-      setCurrentCity(cityA);
-      setNextCity(cityB);
+      setCurrentCity(currentCity);
+      setNextCity(nextCity);
       setScore(0);
+      setSaveError("");
+      setSaveSuccessMessage("");
       setHasError(false);
     } catch (error) {
       const message =
@@ -173,11 +78,10 @@ function App() {
 
   const loadNextCity = async (baseCity: City) => {
     setIsLoadingNextCity(true);
-    setStatusMessage("");
-    setHasError(false);
+    resetRunUiState();
 
     try {
-      const newCity = await buildCity([getCityKey(baseCity)]);
+      const newCity = await createNextCity(apiKey, baseCity);
       setNextCity(newCity);
     } catch (error) {
       const message =
@@ -213,20 +117,20 @@ function App() {
       }
 
       setIsLoadingGame(true);
-      setStatusMessage("");
-      setHasError(false);
+      resetRunUiState();
 
       try {
-        const cityA = await buildCity();
-        const cityB = await buildCity([getCityKey(cityA)]);
+        const { currentCity, nextCity } = await createInitialMatchup(apiKey);
 
         if (!isMounted) {
           return;
         }
 
-        setCurrentCity(cityA);
-        setNextCity(cityB);
+        setCurrentCity(currentCity);
+        setNextCity(nextCity);
         setScore(0);
+        setSaveError("");
+        setSaveSuccessMessage("");
       } catch (error) {
         if (!isMounted) {
           return;
@@ -267,12 +171,21 @@ function App() {
 
     if (!correct) {
       setLastScore(score);
+      setSessionBestScore((currentBestScore) =>
+        Math.max(currentBestScore, score),
+      );
       setShowGameOver(true);
       return;
     }
 
     setCurrentCity(nextCity);
-    setScore((currentScore) => currentScore + 1);
+    setScore((currentScore) => {
+      const nextScore = currentScore + 1;
+      setSessionBestScore((currentBestScore) =>
+        Math.max(currentBestScore, nextScore),
+      );
+      return nextScore;
+    });
 
     if (isEqual) {
       setStatusMessage("Tie on temperature. The round still counts.");
@@ -295,8 +208,34 @@ function App() {
     await loadGame();
   };
 
+  const handleSaveBestScore = async (name: string) => {
+    if (sessionBestScore <= 0 || savedBestScore === sessionBestScore) {
+      return;
+    }
+
+    setIsSavingScore(true);
+    setSaveError("");
+    setSaveSuccessMessage("");
+
+    try {
+      await saveScore(name, sessionBestScore);
+
+      setSavedBestScore(sessionBestScore);
+      setSaveSuccessMessage("Best score saved to the leaderboard.");
+      setLeaderboardRefreshKey((currentKey) => currentKey + 1);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save score.";
+
+      setSaveError(message);
+    } finally {
+      setIsSavingScore(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 px-4 py-10">
+      <Leaderboard refreshKey={leaderboardRefreshKey} />
       <InstructionsDialog
         open={showInstructions}
         onOpenChange={handleInstructionsChange}
@@ -305,12 +244,22 @@ function App() {
       <GameOverDialog
         open={showGameOver}
         score={lastScore}
+        bestScore={sessionBestScore}
+        canSaveBestScore={sessionBestScore > 0 && savedBestScore !== sessionBestScore}
+        isSaving={isSavingScore}
+        saveError={saveError}
+        saveSuccessMessage={saveSuccessMessage}
+        onSaveBestScore={handleSaveBestScore}
         onPlayAgain={() => void handleRestartGame()}
       />
 
       <div className="mx-auto flex max-w-4xl flex-col items-center gap-6">
-        <GameHeader score={score} />
-        <StatusBanner message={statusMessage} />
+        <GameHeader bestScore={sessionBestScore} />
+        <StatusBanner
+          message={statusMessage}
+          currentScore={score}
+          bestScore={sessionBestScore}
+        />
 
         <div className="flex flex-col items-center gap-8 lg:flex-row">
           <CityCard
