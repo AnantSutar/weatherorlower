@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
 import { fetchLeaderboard } from "../../api/leaderboard";
+import { Button } from "../ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 import type { LeaderboardEntry } from "./types";
 
 type LeaderboardProps = {
@@ -10,6 +18,7 @@ export function Leaderboard({ refreshKey }: LeaderboardProps) {
   const [rows, setRows] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -51,8 +60,8 @@ export function Leaderboard({ refreshKey }: LeaderboardProps) {
     };
   }, [refreshKey]);
 
-  return (
-    <aside className="fixed bottom-4 left-4 z-30 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-gray-300 bg-white/95 p-4 shadow-xl backdrop-blur-sm">
+  const leaderboardContent = (
+    <>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
@@ -89,6 +98,32 @@ export function Leaderboard({ refreshKey }: LeaderboardProps) {
           ))}
         </div>
       ) : null}
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <div className="fixed right-4 bottom-4 z-30 sm:hidden">
+        <Button variant="outline" onClick={() => setIsMobileOpen(true)}>
+          View Leaderboard
+        </Button>
+      </div>
+
+      <Dialog open={isMobileOpen} onOpenChange={setIsMobileOpen}>
+        <DialogContent className="sm:hidden">
+          <DialogHeader>
+            <DialogTitle>Leaderboard</DialogTitle>
+            <DialogDescription>
+              Top saved scores for this session and beyond.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto">{leaderboardContent}</div>
+        </DialogContent>
+      </Dialog>
+
+      <aside className="hidden sm:block fixed bottom-4 left-4 z-30 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-gray-300 bg-white/95 p-4 shadow-xl backdrop-blur-sm">
+        {leaderboardContent}
+      </aside>
+    </>
   );
 }
